@@ -4,32 +4,29 @@ sub debug (@);
 sub printmsg (@);
 
 use strict;
-use warnings FATAL => "all";
+use warnings;# FATAL => "all";
 use autodie;
 use Hash::Util;
 use Data::Dumper;
 use Term::ANSIColor;
+
 
 my %options = (
 	filename => undef,
 	debug => 1
 );
 
-analyze_args(@ARGV);
-
-	
 my %open_fds = (
 	0 => 'STDIN',
 	1 => 'STDOUT',
 	2 => 'STDERR'
 );
 
+analyze_args(@ARGV);
 main();
 
 sub main {
 	return unless $options{filename};
-	
-
 
 	my %pipe_fds = ();
 
@@ -48,8 +45,16 @@ sub main {
 	my $i = 0;
 
 	while (my $line = <$fh>) {
+		$line =~ s#^\d*\s*##g;
+		$i++;
+		next if $line =~ m#<unfinished \.\.\.>#;
+		next if $line =~ m#<\.\.\. .* resumed>#;
+		if(check_balanced_objects($line) ne "OK") {
+			warn "ERROR: In line >>>\n$line<<< there are unbalanced characters! Skipping this line.\n";
+			next;
+		}
 #use re 'debugcolor';
-		if($line =~ m#^open\("(?<filename>[^"]+)",\s*(?<mode>[A-Z_|]+)(?:,\s*(?<mode2>$num))?\)\s*=\s*(?<return>$num)(?:\s*(?<error>))?#g) {
+		if($line =~ m#^open\("(?<filename>.*?)",\s*(?<mode>[A-Z_|]+)(?:,\s*(?<mode2>$num))?\)\s*=\s*(?<return>$num)(?:\s*(?<error>))?#g) {
 			if($+{mode2}) {
 				if(exists $+{error} && $+{error}) {
 					printmsg "Opening $+{filename} in mode $+{mode} + $+{mode2}, returned fd $+{return}".error($+{error});
@@ -65,6 +70,13 @@ sub main {
 					$open_fds{$+{return}} = $+{filename};
 				}
 			}
+		} elsif($line =~ m#^open\("(?<filename>.*?)",\s*.*?\)\s*=\s*(?<return>$num)(?:\s*(?<error>))?#g) {
+			#open("/sw/taurus/libraries/python/3.6-anaconda4.4.0/l", {st_mode=S_IFREG|0664, st_size=6671, ...}) = 0
+			printmsg "Opening $+{filename}, returned fd $+{return}".error($+{error});
+
+		} elsif ($line =~ m#^poll\(\[\{fd=(?<fd>\d+),.*\)\s*=\s(?<ret>$ret)(?:\s*(?<error>.*))#) {
+			#poll([{fd=5, events=POLLIN}, {fd=20, events=POLLIN}], 2, 0) = 0 (Timeout)
+			printmsg "Polling for $+{fd} [ -> ".fd_to_filename($+{fd})."], returned $+{ret}".error($+{error});
 		} elsif ($line =~ m#^execve\("(?<programpath>[^"]+)"#) {
 			printmsg "execve'ing $+{programpath}";
 			#$stats{execve}{$+{programpath}}++;
@@ -82,9 +94,15 @@ sub main {
 			#fstat(3, {st_mode=S_IFREG|0644, st_size=344055, ...}) = 0
 			#$stats{fstat}{$+{fd}}++;
 			printmsg "fstatting $+{fd} (to ".fd_to_filename($+{fd}).")";
-		} elsif ($line =~ m#^mmap\((?<addr>$null_or_num),\s*(?<length>$null_or_num),\s*(?<prot>$mode),\s*(?<flags>$mode),\s*(?<fd>$num),\s*(?<offset>$hex_or_num)\)\s*=\s*(?<mem>$hex)#) {
-			#printmsg "mmap($+{addr}, $+{length}, $+{prot}, $+{flags}, $+{num}, $+{offset} = $+{mem}";
+		} elsif ($line =~ m#^mmap\((?<addr>$null_or_num),\s*(?<length>$null_or_num),\s*(?<prot>$mode),\s*(?<flags>$mode)(?:,\s*(?<fd>$num),\s*(?<offset>$hex_or_num))?\)\s*=\s*(?<mem>$hex)(?:\s*(?<error>.*))#) {
 			#mmap(NULL, 344055, PROT_READ, MAP_PRIVATE, 3, 0) = 0x7fab7dfa9000
+			#mmap(0x2b4e98d99000, 24576, PROT_READ|PROT_WRITE, MAP_PRIV{st_mode=S_IFREG|0775, st_size=3693248, ) = 0x2b4e772   mma771   close(4)                          = 0
+			#mmap(NULL, 262144, PROT_READ|PROT_WRITE, MAP_PRIVATE) = 4
+			#mmap(0x2b4a2c676000, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 4, 0) = 4
+			printmsg "mmap($+{addr}, $+{length}, $+{prot}, $+{flags}, $+{num}, $+{offset} = $+{mem}";
+		} elsif ($line =~ m#^mmap\((?<addr>$hex_or_num_or_null_or_mode),\s*.*?\)\s*=\s*(?<mem>$hex_or_num_or_null_or_mode)(?:\s*(?<error>.*))#) {
+			#mmap(0x2b4a2c676000, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 4, 0) = 4
+			printmsg "mmap'ing $+{addr}, ..., returned = $ret".error($+{error});
 		} elsif ($line =~ m#^mprotect\((?<mem>$hex),\s(?<len>$num),\s*(?<mode>$mode)\)\s*=\s*(?<ret>$num)#) {
 			#mprotect(0x7fab7dbd8000, 2097152, PROT_NONE) = 0
 			printmsg "Protecting memory at $+{mem} to $+{len} in mode $+{mode}, returned $+{ret}";
@@ -95,20 +113,30 @@ sub main {
 			if($fd !~ m#^(?:0|1|2)$#) {
 				delete $open_fds{$fd};
 			}
-		} elsif ($line =~ m#^read\((?<fd>\d+),\s*(?:(?:".*?"(?:\.\.\.)?)|$hex),\s+(?<len>\d+)\)\s*=\s*(?<readchars>$ret)(?:\s*(?<error>.*))#) {
+		} elsif ($line =~ m#^read\((?<fd>\d+),\s*(?:(?:".*?"(?:\.\.\.)?)|$hex)(?:,\s+(?<len>\d+))?\)\s*=\s*(?<readchars>$ret)(?:\s*(?<error>.*))#) {
 			#read(3, "\177ELF\2\1\1\0\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0\300\30\0\0\0\0\0\0"..., 832) = 832
 			#read(10, 0x7ffd3f49825f, 1)             = ? ERESTARTSYS (To be restarted if SA_RESTART is set)
-			if(exists $+{error} && $+{error}) {
-				printmsg "Reading $+{len} from $+{fd} (".fd_to_filename($+{fd})."), got $+{ret}".error($+{error});
+			if(exists $+{len} && defined $+{len}) {
+				if(exists $+{error} && $+{error}) {
+					printmsg "Reading $+{len} from $+{fd} (".fd_to_filename($+{fd})."), got $+{ret}".error($+{error});
+				} else {
+					printmsg "Reading $+{len} from $+{fd} (".fd_to_filename($+{fd})."), got $+{ret}"; 
+				} 
 			} else {
-				printmsg "Reading $+{len} from $+{fd} (".fd_to_filename($+{fd})."), got $+{ret}"; 
+				if(exists $+{error} && $+{error}) {
+					printmsg "Reading from $+{fd} (".fd_to_filename($+{fd})."), got $+{ret}".error($+{error});
+				} else {
+					printmsg "Reading from $+{fd} (".fd_to_filename($+{fd})."), got $+{ret}"; 
+				} 
 			}
 		} elsif ($line =~ m#^arch_prctl\((?<mode>$mode),\s*(?<mem>$hex_or_num_or_null)\)\s*=\s*(?<ret>$num)#) {
 			#arch_prctl(ARCH_SET_FS, 0x7fab7dfa5f80) = 0
 			printmsg "arch_prctl($+{mode}, $+{mem}) = $+{ret}";
-		} elsif ($line =~ m#^munmap\((?<mem>$hex_or_num_or_null),\s*(?<size>$num)\)\s*=\s*(?<ret>$num)#) {
+		} elsif ($line =~ m#^munmap\((?<mem>$hex_or_num_or_null),\s*(?<size>$num)\)\s*=\s*(?<ret>$hex_or_num_or_null_or_mode)(?:\s*(?<error>.*))#) {
 			#munmap(0x7fab7dfa9000, 344055)          = 0
-			printmsg "munmap($+{mem}, $+{size}) = $+{ret}";
+			#munmap(0x2b4a2fc05000, 262144) 10857 s10859 mmap(NULL, 262144, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x2b4a2fc05000
+			#
+			printmsg "munmap($+{mem}, $+{size}) = $+{ret}".error($+{error});
 		} elsif ($line =~ m#^getuid\(\)\s*=\s*(?<uid>\d+)#) {
 			printmsg "getuid() = $+{uid}";
 		} elsif ($line =~ m#^geteuid\(\)\s*=\s*(?<uid>\d+)#) {
@@ -129,11 +157,12 @@ sub main {
 			} else {
 				printmsg "ioctl($+{fd} [ -> ".fd_to_filename($+{fd})."], ...) = $+{ret}";
 			}
-		} elsif ($line =~ m#^readlink\("(?<link>[^"]+)",\s*(?<to>(?:".*?"+|$hex)),\s*(?<len>\d+)\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
+		} elsif ($line =~ m#^readlink\("(?<link>[^"]+)",\s*(?<to>(?:(?:".*?"+(?:\.\.\.)?)|$hex)),\s*(?<len>\d+)\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
 			#readlink("/proc/self/fd/0", "/dev/pts/2", 4095) = 10
 			#readlink("/usr/bin/python3.5", 0x7fffdf0f3b50, 4096) = -1 EINVAL (Invalid argument)
+			#readlink("/proc/self/exe", "/software/taurus/libraries/pytho"..., 4096) = 65
 			printmsg "Reading symbolic link $+{link} (to $+{to}), length: $+{len}. Returned $+{ret}".error($+{error});
-		} elsif ($line =~ m#^stat\("(?<file>[^"]+)",\s*.+\)\s*=\s*(?<ret>\d*)#) {
+		} elsif ($line =~ m#^stat\("(?<file>[^"]+)"(?:,\s*.+)?\)\s*=\s*(?<ret>\d*)#) {
 			#stat("/dev/pts/2", {st_mode=S_IFCHR|0600, st_rdev=makedev(136, 2), ...}) = 0
 			printmsg "stat'ting $+{file}, returned $+{ret}";
 		} elsif ($line =~ m#^lstat\("(?<file>.+?)",\s*.+\)\s*=\s*(?<ret>\d*)#) {
@@ -185,21 +214,44 @@ sub main {
 		} elsif ($line =~ m#^gettimeofday\([^\)]+\)\s*=\s*(\d+)#) {
 			#gettimeofday({tv_sec=1567854290, tv_usec=264153}, {tz_minuteswest=-120, tz_dsttime=0}) = 0
 			printmsg "gettimeofday(...)";
-		} elsif ($line =~ m#^socket\((?<domain>$mode),\s*(?<type>$mode),\s*(?<protocol>$mode)\)\s*=\s*(?<ret>\d+)#) {
+		} elsif ($line =~ m#^socket\((?<domain>$mode),\s*(?<type>$mode),\s*(?<protocol>$mode)\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
 			#socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0) = 11
 			#socket(AF_INET6, SOCK_STREAM|SOCK_CLOEXEC, IPPROTO_IP) = 3
-			printmsg "Opening socket $+{domain} with type $+{type} and protocol $+{protocol}, returned $+{ret}";
+			#socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP) = -1 EACCES (Permission denied)
+			printmsg "Opening socket $+{domain} with type $+{type} and protocol $+{protocol}, returned $+{ret}".error($+{error});
 			$open_fds{$+{ret}} = $+{domain};
-		} elsif ($line =~ m#^connect\((?<socketfd>\d+),\s*[^\)]+\)\s*=\s*(?<ret>$num)\s*((?<error>.*))?#) {
+		} elsif ($line =~ m#^connect\((?<socketfd>\d+),\s*.*?\)\s*=\s*(?<ret>$num)\s*((?<error>.*))?#) {
 			#connect(11, {sa_family=AF_UNIX, sun_path="/var/run/nscd/socket"}, 110) = -1 ENOENT (No such file or directory)
+			#connect(4, {sa_family=AF_INET, sin_port=htons(30290), sin_addr=inet_addr("172.24.138.246")}, 16) = -1 EINPROGRESS (Operation now in progress)
 			printmsg "Connecting to $+{socketfd} (-> ".$open_fds{$+{socketfd}}."), returned $+{ret}".error($+{error});
 		} elsif ($line =~ m#^lseek\((?<fd>\d+),\s*(?<offset>$num),\s*(?<mode>$mode)\)\s*=\s*(?<ret>$num)(?:\s*(?<error>.*))#) {
 			#lseek(3, 0, SEEK_CUR)                   = 0
 			#lseek(11, 0, SEEK_CUR)                  = 0
 			printmsg "lseek'ing $+{fd} (-> ".fd_to_filename($+{fd})."), mode = $+{mode}, returned: $+{ret}".error($+{error});
+		} elsif ($line =~ m#^select\((?<fd>\d+),.*?\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
+			#select(0, NULL, NULL, NULL, {0, 500000}) = 0 (Timeout)
+			printmsg "Selecting $+{fd}, returned $+{ret}".error($+{error});
+		} elsif ($line =~ m#^madvise\((?<addr>$hex_or_num_or_null),.*?\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
+			#madvise(0x2abca506a000, 2076672, MADV_DONTNEED) = 0
+			printmsg "Memory advisor for $+{addr} returned $+{ret}".error($+{error});
 		} elsif ($line =~ m#^uname\(#) {
 			#uname({sysname="Linux", nodename="alanwatts", ...}) = 0
 			printmsg "uname called";
+		} elsif ($line =~ m#^newfstatat\((?<fd>\d+),\s*"(?<path>.*?)",.*?\)\s*=\s*(?<ret>$num)(?:\s*(?<error>.*))#) {
+			#newfstatat(13, "sys/bus/pci/devices/0000:07:00.1//mic", 0x7ffd54c66a30, AT_SYMLINK_NOFOLLOW) = -1 ENOENT (No such file or directory)
+			printmsg "newfstatat called for fd $+{fd} [ -> ".fd_to_filename($+{fd})."]. Returned $+{ret}".error($+{error});
+		} elsif ($line =~ m#^statfs\("(?<path>.*?)",.*?\)\s*=\s*(?<ret>$num)(?:\s*(?<error>.*))#) {
+			#statfs("/dev/hugepages", {f_type=HUGETLBFS_MAGIC, f_bsize=2097152, f_blocks=0, f_bfree=0, f_bavail=0, f_files=0, f_ffree=0, f_fsid={0, 0}, f_namelen=255, f_frsize=2097152, f_flags=ST_VALID|ST_RELATIME}) = 0
+			printmsg "Called statfs($+{path}, ...). Returned $+{ret}".error($+{error});
+		} elsif ($line =~ m#^sched_get_priority_max\((?<mode>$mode)\)\s*=\s*(?<ret>$num)(?:\s*(?<error>.*))#) {
+			#sched_get_priority_max(SCHED_RR)  = 99
+			printmsg "Called sched_get_priority_max($+{mode}). Returned $+{ret}".error($+{error});
+		} elsif ($line =~ m#^sched_get_priority_min\((?<mode>$mode)\)\s*=\s*(?<ret>$num)(?:\s*(?<error>.*))#) {
+			#sched_get_priority_min(SCHED_RR)  = 1
+			printmsg "Called sched_get_priority_min($+{mode}). Returned $+{ret}".error($+{error});
+		} elsif ($line =~ m#^mmastat\("(?<filename>.*?)",\s*.*\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
+			#mmastat("/home/h8/s3811141/nnopt/script/hyperopt-mongo-worker", {st_mode=S_IFREG|0755, st_size=175, ...}) = 0
+			printmsg "mmstat called for $+{filename}, returned $+{ret}".error($+{error});
 		} elsif ($line =~ m#^clock_gettime\(#) {
 			#clock_gettime(CLOCK_REALTIME, {tv_sec=1567868779, tv_nsec=484741873}) = 0
 			printmsg "got time via clock_gettime()";
@@ -231,6 +283,9 @@ sub main {
 		} elsif ($line =~ m#^getdents\((?<fd>\d+),.*?\)\s*=\s*(?<ret>\d*)#) {
 			#getdents(3, /* 276 entries */, 32768)   = 10096
 			printmsg "Get directory entries for fd $+{fd} (-> ".fd_to_filename($+{fd})."), returned $+{ret}";
+		} elsif ($line =~ m#^getdents64\((?<fd>\d+),.*?\)\s*=\s*(?<ret>\d*)#) {
+			#getdents64(4, /* 9 entries */, 280) = 216
+			printmsg "Get directory entries (getdents64) for fd $+{fd} (-> ".fd_to_filename($+{fd})."), returned $+{ret}";
 		} elsif ($line =~ m#^clone\((?<params>.*?)\)\s*=\s*(?<ret>$num)#) {
 			#clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7fab7dfa6250) = 9988
 			printmsg "Called clone($+{params}), returned $+{ret}";
@@ -251,7 +306,10 @@ sub main {
 		} elsif ($line =~ m#^exit_group\((?<exit>\d+)\)\s*=\s*(?<ret>$ret)#) {
 			#exit_group(0)                           = ?
 			debug "Exiting with $+{exit} returned $+{ret}";
-		} elsif ($line =~ m#^(\+\+\+|---)(.*)\1#) {
+		} elsif ($line =~ m#^exit\((?<exit>\d+)\)\s*=\s*(?<ret>$ret)#) {
+			#exit(0)                           = ?
+			debug "Exiting with $+{exit} returned $+{ret}";
+		} elsif ($line =~ m#^(\+\+\+|---)(.*)#) {
 			#+++ exited with 0 +++
 			#--- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=9988, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
 			printmsg "Got weird line $2";
@@ -269,17 +327,17 @@ sub main {
 			} else {
 				printmsg "Return from sighandler, returned $+{ret}.";
 			}
-		} elsif ($line =~ m#^kill\((?<pid>$num),\s*(?<signal>$mode)\)\s*=\s*$ret(?:\s*(?<error>.*))#) {
+		} elsif ($line =~ m#^kill\((?<pid>$num),\s*(?<signal>$mode)\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
 			#kill(9998, SIG_0)                       = 0
 			#kill(-10018, SIG_0)                     = -1 ESRCH (No such process)
 			if(exists $+{error} && $+{error}) {
-				printmsg "Sending $+signal to $+pid".error($+{error});
+				printmsg "Sending $+signal to $+pid. Returned $+{ret}".error($+{error});
 			} else {
-				printmsg "Sending $+signal to $+pid";
+				printmsg "Sending $+signal to $+pid. Returned $+{ret}";
 			}
-		} elsif ($line =~ m#^write\((?<fd>\d+),.*?,\s*(?<len>\d+)\)\s*=\s*(?<ret>$ret)#) {
+		} elsif ($line =~ m#^write\((?<fd>\d+),.*?,\s*(?<len>\d+)\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
 			#write(1, "ack-grep not found\n", 19)    = 19
-			printmsg "Writing $+{len} characters to fd $+{fd} ( -> ".fd_to_filename($+{fd})."), returned $+{ret}";
+			printmsg "Writing $+{len} characters to fd $+{fd} ( -> ".fd_to_filename($+{fd})."), returned $+{ret}".error($+{error});
 		} elsif ($line =~ m#^symlink\("(?<target>[^"]*)", "(?<linkpath>[^"]*)"\)\s*=\s*(?<ret>$ret)#) {
 			#symlink("/pid-9987/host-alanwatts", "/home/norman/.zsh_history.LOCK") = 0
 			printmsg "Creating symbolic link $+{target} to $+{linkpath}";
@@ -293,6 +351,27 @@ sub main {
 		} elsif ($line =~ m#^capget\(#) {
 			#capget({version=_LINUX_CAPABILITY_VERSION_3, pid=0}, NULL) = 0
 			printmsg "Called capget";
+		} elsif ($line =~ m#^capset\(#) {
+			#capset({_LINUX_CAPABILITY_VERSION_3, 0}, {0, 0, 0}) = 0
+			printmsg "Called capset";
+		} elsif ($line =~ m#^setuid\(.*?\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
+			#setuid(2105408)                   = 0
+			printmsg "Setting effective user id. Return $+{ret}".error($+{error});
+		} elsif ($line =~ m#^prctl\((?<mode>$mode),\s*(?<number>\d+)\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
+			#prctl(PR_SET_KEEPCAPS, 1)         = 0
+			printmsg "Called prctl($+{mode}, $+{number}). Returned $+{ret}".error($+{error});
+		} elsif ($line =~ m#^setsockopt\((?<socket>\d+),\s.*?\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
+			#setsockopt(4, SOL_TCP, TCP_NODELAY, [1], 4) = 0
+			printmsg "Setting socket option for socket $+{socket}. Returned $+{ret}".error($+{error});
+		} elsif ($line =~ m#^getsockopt\((?<socket>\d+),\s.*?\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
+			#getsockopt(4, SOL_TCP, TCP_KEEPIDLE, [7200], [4]) = 0
+			printmsg "Getting socket option for socket $+{socket}. Returned $+{ret}".error($+{error});
+		} elsif ($line =~ m#^sendto\((?<socket>\d+),.*\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
+			#sendto(4, "_\0\0\0{\337\2001\0\0\0\0\335\7\0\0\0\0\0\0\0J\0\0\0\20ismast"..., 95, 0, NULL, 0) = 95
+			printmsg "Send to $+{socket}. Returned $+{ret}".error($+{error});
+		} elsif ($line =~ m#^recvfrom\((?<socket>\d+),.*\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
+			#recvfrom(4, "\340\0\0\0\313\234\0\0{\337\2001\335\7\0\0", 16, 0, NULL, NULL) = 16
+			printmsg "Receive from $+{socket}. Returned $+{ret}".error($+{error});
 		} elsif ($line =~ m#^alarm\((?<time>\d+)\)\s*=\s*(?<ret>$num)#) {
 			#alarm(0)                                = 0
 			printmsg "Called alarm($+{time}), returned $+{ret}";
@@ -309,13 +388,22 @@ sub main {
 			printmsg "get_random with length $+{len} and flags $+{flags} returned $+{ret}";
 		} elsif ($line =~ m#^bind\((?<socket>\d+), .*?\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
 			#bind(3, {sa_family=AF_INET6, sin6_port=htons(0), inet_pton(AF_INET6, "::1", &sin6_addr), sin6_flowinfo=htonl(0), sin6_scope_id=0}, 28) = -1 EADDRNOTAVAIL (Cannot assign requested address)
-			printmsg "bind'ing $+{socket}, returned $ret".error($+{error});
+			printmsg "bind'ing $+{socket}, returned $+{ret}".error($+{error});
+		} elsif ($line =~ m#^chdir\("(?<folder>.*?)"\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
+			#chdir("/home/h8/s3811141/nnopt/projects/bm_logfile") = 0
+			printmsg "Changing dir to $+{folder}. Returned $ret".error($+{error});
+		} elsif ($line =~ m#^openat\((?<dirfd>$hex_or_num_or_null_or_mode),\s*"(?<path>.*?)",\s*(?<mode>.*?)\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
+			#openat(AT_FDCWD, "/home/h8/s3811141/nnopt/script/", O_RDONLY|O_NONBLOCK|O_DIRECTORY|O_CLOEXEC) = 3
+			printmsg "Trying to open $+path with dirfd = $+{dirfd} and mode = $+{mode}. Returned $+{ret}".error($+{error});
+		} elsif($line =~ m#^(?<funcname>[a-z0-9_]+)\((?<firstparam>.*?)\)\s*=\s*(?<return>$ret)(?:\s*(?<error>))?#g) {
+			#get_mempolicy(NULL, NULL, 0, NULL, 0) = 0
+			printmsg "Called $+{funcname}($+{firstparam}). Returned $+{ret}".error($+{error});
 		} elsif ($line =~ m#^\s*$#) {
 		} else {
 			chomp $line;
-			die "Unknown line $i:\n".color("red").$line.color("reset")."\n";
+			die "Unknown line $i\n".color("red").$line.color("reset")."\n";
 		}
-		$i++;
+		warn $i if $i % 1000 == 0;
 	}
 	close $fh;
 }
@@ -370,4 +458,19 @@ sub error {
 	} else {
 		return '';
 	}
+}
+
+sub check_balanced_objects {
+	my $string = shift;
+
+	my $number_of_quotes = () = $string =~ /(?<!\\)"/gi;
+
+	if($number_of_quotes % 2 == 0) {
+		my $number_of_open_brackets = () = $string =~ /(?<!\\)\(/gi;
+		my $number_of_close_brackets = () = $string =~ /(?<!\\)\)/gi;
+		if($number_of_open_brackets == $number_of_close_brackets) {
+			return "OK";
+		}
+	}
+	return "NOT OK";
 }
