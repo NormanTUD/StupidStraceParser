@@ -4,31 +4,34 @@ sub debug (@);
 sub printmsg (@);
 
 use strict;
-use warnings;# FATAL => "all";
+use warnings FATAL => "all";
 use autodie;
 use Hash::Util;
 use Data::Dumper;
 use Term::ANSIColor;
 
+my %errors = ();
 
 my %options = (
 	filename => undef,
 	debug => 1
 );
 
+analyze_args(@ARGV);
+
+	
 my %open_fds = (
 	0 => 'STDIN',
 	1 => 'STDOUT',
 	2 => 'STDERR'
 );
 
-analyze_args(@ARGV);
 main();
 
 sub main {
 	return unless $options{filename};
+	
 
-	my %pipe_fds = ();
 
 	#my %stats = ();
 	open my $fh, '<', $options{filename};
@@ -53,27 +56,13 @@ sub main {
 			warn "ERROR: In line >>>\n$line<<< there are unbalanced characters! Skipping this line.\n";
 			next;
 		}
+#exit if $line =~ m#nanosleep#;
 #use re 'debugcolor';
-		if($line =~ m#^open\("(?<filename>.*?)",\s*(?<mode>[A-Z_|]+)(?:,\s*(?<mode2>$num))?\)\s*=\s*(?<return>$num)(?:\s*(?<error>))?#g) {
-			if($+{mode2}) {
-				if(exists $+{error} && $+{error}) {
-					printmsg "Opening $+{filename} in mode $+{mode} + $+{mode2}, returned fd $+{return}".error($+{error});
-				} else {
-					printmsg "Opening $+{filename} in mode $+{mode} + $+{mode2}, returned fd $+{return}";
-					$open_fds{$+{return}} = $+{filename};
-				}
-			} else {
-				if(exists $+{error} && $+{error}) {
-					printmsg "Opening $+{filename} in mode $+{mode}, returned fd $+{return}".error($+{error});
-				} else {
-					printmsg "Opening $+{filename} in mode $+{mode}, returned fd $+{return}";
-					$open_fds{$+{return}} = $+{filename};
-				}
+		if($line =~ m#^open\("(?<filename>.*?)"(?:,\s*(?<rest>.*))?\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))?#g) {
+			printmsg "Opening $+{filename} in mode $+{rest}, returned fd $+{ret}".error($+{error});
+			if(!error($+{error})) {
+				$open_fds{$+{ret}} = $+{filename};
 			}
-		} elsif($line =~ m#^open\("(?<filename>.*?)",\s*.*?\)\s*=\s*(?<return>$num)(?:\s*(?<error>))?#g) {
-			#open("/sw/taurus/libraries/python/3.6-anaconda4.4.0/l", {st_mode=S_IFREG|0664, st_size=6671, ...}) = 0
-			printmsg "Opening $+{filename}, returned fd $+{return}".error($+{error});
-
 		} elsif ($line =~ m#^poll\(\[\{fd=(?<fd>\d+),.*\)\s*=\s(?<ret>$ret)(?:\s*(?<error>.*))#) {
 			#poll([{fd=5, events=POLLIN}, {fd=20, events=POLLIN}], 2, 0) = 0 (Timeout)
 			printmsg "Polling for $+{fd} [ -> ".fd_to_filename($+{fd})."], returned $+{ret}".error($+{error});
@@ -86,29 +75,30 @@ sub main {
 			#access("/etc/ld.so.nohwcap", F_OK)      = -1 ENOENT (No such file or directory)
 			#$stats{access}{$+{filename}}{$+{mode}}{$+{return}}{$+{error}}++;
 			if(exists $+{error} && $+{error}) {
-				printmsg "Accessing $+{filename} in mode $+{mode}, returned $+{return} with error $+{error}";
+				printmsg "Accessing $+{filename} in mode $+{mode}, returned $+{return}".error($+{error});
 			} else {
 				printmsg "Accessing $+{filename} in mode $+{mode}, returned $+{return}";
 			}
-		} elsif ($line =~ m#^fstat\((?<fd>\d+), #) {
+		} elsif ($line =~ m#^fstat\((?<fd>\d+),(?<rest>.*)?\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
 			#fstat(3, {st_mode=S_IFREG|0644, st_size=344055, ...}) = 0
 			#$stats{fstat}{$+{fd}}++;
-			printmsg "fstatting $+{fd} (to ".fd_to_filename($+{fd}).")";
-		} elsif ($line =~ m#^mmap\((?<addr>$null_or_num),\s*(?<length>$null_or_num),\s*(?<prot>$mode),\s*(?<flags>$mode)(?:,\s*(?<fd>$num),\s*(?<offset>$hex_or_num))?\)\s*=\s*(?<mem>$hex)(?:\s*(?<error>.*))#) {
+			printmsg "fstat'ting $+{fd} (to ".fd_to_filename($+{fd}).") [$+{rest}] returned $+{ret}".error($+{error});
+		} elsif ($line =~ m#^mmap\((?<addr>$null_or_num),\s*(?<length>$null_or_num)(?<rest>.*)?\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
+			#mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x2ab6b925f000
 			#mmap(NULL, 344055, PROT_READ, MAP_PRIVATE, 3, 0) = 0x7fab7dfa9000
 			#mmap(0x2b4e98d99000, 24576, PROT_READ|PROT_WRITE, MAP_PRIV{st_mode=S_IFREG|0775, st_size=3693248, ) = 0x2b4e772   mma771   close(4)                          = 0
 			#mmap(NULL, 262144, PROT_READ|PROT_WRITE, MAP_PRIVATE) = 4
 			#mmap(0x2b4a2c676000, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 4, 0) = 4
-			printmsg "mmap($+{addr}, $+{length}, $+{prot}, $+{flags}, $+{num}, $+{offset} = $+{mem}";
+			printmsg "mmap($+{addr}, $+{length}, $+{rest}) = $+{ret}".error($+{error});
 		} elsif ($line =~ m#^mmap\((?<addr>$hex_or_num_or_null_or_mode),\s*.*?\)\s*=\s*(?<mem>$hex_or_num_or_null_or_mode)(?:\s*(?<error>.*))#) {
 			#mmap(0x2b4a2c676000, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 4, 0) = 4
 			printmsg "mmap'ing $+{addr}, ..., returned = $ret".error($+{error});
 		} elsif ($line =~ m#^mprotect\((?<mem>$hex),\s(?<len>$num),\s*(?<mode>$mode)\)\s*=\s*(?<ret>$num)#) {
 			#mprotect(0x7fab7dbd8000, 2097152, PROT_NONE) = 0
 			printmsg "Protecting memory at $+{mem} to $+{len} in mode $+{mode}, returned $+{ret}";
-		} elsif ($line =~ m#^close\((?<fd>\d+)\)#) {
+		} elsif ($line =~ m#^close\((?<fd>\d+)\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
 			#close(3)
-			printmsg "Closing $+{fd} (to ".fd_to_filename($+{fd}).")";
+			printmsg "Closing $+{fd} (to ".fd_to_filename($+{fd})."), returned $+{ret}".error($+{error});
 			my $fd = $+{fd};
 			if($fd !~ m#^(?:0|1|2)$#) {
 				delete $open_fds{$fd};
@@ -169,7 +159,7 @@ sub main {
 			#lstat("/home/norman/.oh-my-zsh/custom/plugins/zsh-autosuggestions", {st_mode=S_IFDIR|0755, st_size=4096, ...}) = 0
 			#lstat("\"^opn", 0x55d2799deac0)         = -1 ENOENT (No such file or directory)
 			printmsg "lstat'ting $+{file}, returned $+{ret}";
-		} elsif ($line =~ m#^fcntl\((?<fd>\d+),\s*(?<mode>$hex_or_num_or_null_or_mode)(?:,\s*(?<param>$hex_or_num_or_null_or_mode))?\)\s*=\s*(?<ret>$num)(?:\s*(?<error>.*))#) {
+		} elsif ($line =~ m#^fcntl\((?<fd>\d+),\s*(?<mode>$hex_or_num_or_null_or_mode)(?:,\s*(?<param>$hex_or_num_or_null_or_mode))?\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
 			#fcntl(3, F_DUPFD, 10)                   = 10
 			if(exists $+{error} && $+{error}) {
 				printmsg "manipulating fd with fcntl $+{fd} (-> ".fd_to_filename($+{fd})."), mode: $+{mode}, returned $+{ret}".error($+{error});
@@ -194,11 +184,12 @@ sub main {
 		} elsif ($line =~ m#^pipe\(\[(?<pipe1>\d*),\s*(?<pipe2>\d+)]\)\s*=\s*(?<ret>\d+)(?:\s*(?<error>.*))#) {
 			#pipe([3, 4])                            = 0
 			printmsg "Opening pipe $+{pipe1}, set to $+{pipe2}".error($+{error});
-			$pipe_fds{$+{pipe1}} = $+{pipe2};
+			$open_fds{$+{pipe1}} = $+{pipe2};
 		} elsif ($line =~ m#^pipe2\(\[(?<pipe1>\d*),\s*(?<pipe2>\d+)],\s*(?<mode>$mode)\)\s*=\s*(?<ret>\d+)(?:\s*(?<error>.*))#) {
 			#pipe2([3, 4], O_CLOEXEC)                = 0
 			printmsg "Opening pipe2 $+{pipe1}, set to $+{pipe2} with mode $+{mode}".error($+{error});
-			$pipe_fds{$+{pipe1}} = $+{pipe2};
+			$open_fds{$+{pipe1}} = $+{pipe2};
+			#die Dumper \%open_fds;
 		} elsif ($line =~ m#^dup\((?<fd>\d+)\)\s*=\s*(?<newfd>\d+)#) {
 			#dup(0)                                  = 5
 			printmsg "Duplicating fd $+{fd} (-> $open_fds{$+{fd}}) to new fd $+{newfd}";
@@ -220,10 +211,10 @@ sub main {
 			#socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP) = -1 EACCES (Permission denied)
 			printmsg "Opening socket $+{domain} with type $+{type} and protocol $+{protocol}, returned $+{ret}".error($+{error});
 			$open_fds{$+{ret}} = $+{domain};
-		} elsif ($line =~ m#^connect\((?<socketfd>\d+),\s*.*?\)\s*=\s*(?<ret>$num)\s*((?<error>.*))?#) {
+		} elsif ($line =~ m#^connect\((?<socketfd>\d+),\s*.*?\)\s*=\s*(?<ret>$ret)\s*((?<error>.*))?#) {
 			#connect(11, {sa_family=AF_UNIX, sun_path="/var/run/nscd/socket"}, 110) = -1 ENOENT (No such file or directory)
 			#connect(4, {sa_family=AF_INET, sin_port=htons(30290), sin_addr=inet_addr("172.24.138.246")}, 16) = -1 EINPROGRESS (Operation now in progress)
-			printmsg "Connecting to $+{socketfd} (-> ".$open_fds{$+{socketfd}}."), returned $+{ret}".error($+{error});
+			printmsg "Connecting to $+{socketfd} (-> ".fd_to_filename($+{socketfd})."), returned $+{ret}".error($+{error});
 		} elsif ($line =~ m#^lseek\((?<fd>\d+),\s*(?<offset>$num),\s*(?<mode>$mode)\)\s*=\s*(?<ret>$num)(?:\s*(?<error>.*))#) {
 			#lseek(3, 0, SEEK_CUR)                   = 0
 			#lseek(11, 0, SEEK_CUR)                  = 0
@@ -297,18 +288,18 @@ sub main {
 			} else {
 				printmsg "Waiting for signal $+{sig} with $+{mode}, returned $+{ret}";
 			}
-		} elsif ($line =~ m#^set_tid_address\((?<mem>$hex)\)\s*=\s*(?<ret>$num)#) {
+		} elsif ($line =~ m#^set_tid_address\((?<mem>$hex)\)\s*=\s*(?<ret>$num)(?:\s*(?<error>.*))#) {
 			#set_tid_address(0x7f59309531d0)         = 31114
-			debug "Set pointer to thread id $+{mem} returned $+{ret}";
-		} elsif ($line =~ m#^set_robust_list\((?<mem>$hex),\s*(?<size>\d+)\)\s*=\s*(?<ret>\d*)#) {
+			printmsg "Set pointer to thread id $+{mem} returned $+{ret}".error($+{error});
+		} elsif ($line =~ m#^set_robust_list\((?<mem>$hex),\s*(?<size>\d+)\)\s*=\s*(?<ret>\d*)(?:\s*(?<error>.*))#) {
 			#set_robust_list(0x7f59309531e0, 24)     = 0
-			debug "get_robust_list($+{mem}) = $+{ret}";
-		} elsif ($line =~ m#^exit_group\((?<exit>\d+)\)\s*=\s*(?<ret>$ret)#) {
+			printmsg "get_robust_list($+{mem}) = $+{ret}".error($+{error});
+		} elsif ($line =~ m#^exit_group\((?<exit>\d+)\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
 			#exit_group(0)                           = ?
-			debug "Exiting with $+{exit} returned $+{ret}";
-		} elsif ($line =~ m#^exit\((?<exit>\d+)\)\s*=\s*(?<ret>$ret)#) {
+			printmsg "Exiting with $+{exit} returned $+{ret}".error($+{error});
+		} elsif ($line =~ m#^exit\((?<exit>\d+)\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
 			#exit(0)                           = ?
-			debug "Exiting with $+{exit} returned $+{ret}";
+			printmsg "Exiting with $+{exit} returned $+{ret}".error($+{error});
 		} elsif ($line =~ m#^(\+\+\+|---)(.*)#) {
 			#+++ exited with 0 +++
 			#--- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=9988, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
@@ -335,9 +326,15 @@ sub main {
 			} else {
 				printmsg "Sending $+signal to $+pid. Returned $+{ret}";
 			}
-		} elsif ($line =~ m#^write\((?<fd>\d+),.*?,\s*(?<len>\d+)\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
+		} elsif ($line =~ m#^write\((?<fd>\d+),\s*(?<rest>.*?)\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
 			#write(1, "ack-grep not found\n", 19)    = 19
-			printmsg "Writing $+{len} characters to fd $+{fd} ( -> ".fd_to_filename($+{fd})."), returned $+{ret}".error($+{error});
+			#write(2, "INFO:hyperopt.mongoexp:PROTOCOL "..., 38) = -1 EPIPE (Broken pipe)
+			my ($rest, $tfd, $tret, $terror) = ($+{rest}, $+{fd}, $+{ret}, $+{error});
+			printmsg "Writing $+{rest} to fd $+{fd} ( -> ".fd_to_filename($+{fd})."), returned $+{ret}".error($+{error});
+			#if($line =~ m#INFO:hyperopt.mongoexp:PROTOCOL# && $line =~ m#-1#) {
+			#	warn $line;
+			#	die Dumper \%copy;
+			#}
 		} elsif ($line =~ m#^symlink\("(?<target>[^"]*)", "(?<linkpath>[^"]*)"\)\s*=\s*(?<ret>$ret)#) {
 			#symlink("/pid-9987/host-alanwatts", "/home/norman/.zsh_history.LOCK") = 0
 			printmsg "Creating symbolic link $+{target} to $+{linkpath}";
@@ -371,10 +368,16 @@ sub main {
 			printmsg "Send to $+{socket}. Returned $+{ret}".error($+{error});
 		} elsif ($line =~ m#^recvfrom\((?<socket>\d+),.*\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
 			#recvfrom(4, "\340\0\0\0\313\234\0\0{\337\2001\335\7\0\0", 16, 0, NULL, NULL) = 16
-			printmsg "Receive from $+{socket}. Returned $+{ret}".error($+{error});
+			printmsg "Receive from $+{socket} ( -> ".fd_to_filename($+{socket})."). Returned $+{ret}".error($+{error});
 		} elsif ($line =~ m#^alarm\((?<time>\d+)\)\s*=\s*(?<ret>$num)#) {
 			#alarm(0)                                = 0
 			printmsg "Called alarm($+{time}), returned $+{ret}";
+		} elsif ($line =~ m#^socket\((?<socket>$mode)(?<rest>.*)\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
+			#socket(AF_LOCAL, SOCK_STREAM, 0)  = 22
+			printmsg "Opened socket $+{socket}$+{rest}. Returned $+{ret}".error($+{error});
+			if(!(exists $+{error} && $+{error})) {
+				$open_fds{$+{ret}} = $+{socket};
+			}
 		} elsif ($line =~ m#^nanosleep\(#) {
 			#nanosleep({tv_sec=0, tv_nsec=1000000}, 0x7fffdf101840) = 0
 			printmsg "nanosleep'ing";
@@ -394,8 +397,9 @@ sub main {
 			printmsg "Changing dir to $+{folder}. Returned $ret".error($+{error});
 		} elsif ($line =~ m#^openat\((?<dirfd>$hex_or_num_or_null_or_mode),\s*"(?<path>.*?)",\s*(?<mode>.*?)\)\s*=\s*(?<ret>$ret)(?:\s*(?<error>.*))#) {
 			#openat(AT_FDCWD, "/home/h8/s3811141/nnopt/script/", O_RDONLY|O_NONBLOCK|O_DIRECTORY|O_CLOEXEC) = 3
-			printmsg "Trying to open $+path with dirfd = $+{dirfd} and mode = $+{mode}. Returned $+{ret}".error($+{error});
-		} elsif($line =~ m#^(?<funcname>[a-z0-9_]+)\((?<firstparam>.*?)\)\s*=\s*(?<return>$ret)(?:\s*(?<error>))?#g) {
+			printmsg "Trying to open $+{path} with dirfd = $+{dirfd} and mode = $+{mode}. Returned $+{ret}".error($+{error});
+			$open_fds{$+{ret}} = $+{path};
+		} elsif($line =~ m#^(?<funcname>[a-z0-9_]+)\((?<firstparam>.*?)\)\s*=\s*(?<return>$ret)(?:\s*(?<error>.*))?#g) {
 			#get_mempolicy(NULL, NULL, 0, NULL, 0) = 0
 			printmsg "Called $+{funcname}($+{firstparam}). Returned $+{ret}".error($+{error});
 		} elsif ($line =~ m#^\s*$#) {
@@ -403,7 +407,7 @@ sub main {
 			chomp $line;
 			die "Unknown line $i\n".color("red").$line.color("reset")."\n";
 		}
-		warn $i if $i % 1000 == 0;
+		warn $i if $i % 10000 == 0;
 	}
 	close $fh;
 }
@@ -442,10 +446,10 @@ sub printmsg (@) {
 sub fd_to_filename {
 	my $fd = shift;
 
-	if(exists $open_fds{$+{fd}}) {
-		return $open_fds{$fd};
+	if(exists $open_fds{$fd}) {
+		return color("underline").$open_fds{$fd}.color("reset").color("blue");
 	} else {
-		return color("red")."!!! unknown_fd !!!".color("blue");
+		return color("red")."!!! ERROR: unknown_fd !!!".color("blue");
 	}
 }
 
@@ -454,7 +458,8 @@ sub error {
 	chomp $error;
 
 	if($error) {
-		return ". ".color("on_red")."ERROR: $error".color("blue")." ";
+		$errors{$error}++;
+		return ". ".color("underline red")."ERROR: $error".color("reset").color("blue")." ";
 	} else {
 		return '';
 	}
@@ -463,9 +468,12 @@ sub error {
 sub check_balanced_objects {
 	my $string = shift;
 
+
+	$string =~ s#\\\\##g;
 	my $number_of_quotes = () = $string =~ /(?<!\\)"/gi;
 
 	if($number_of_quotes % 2 == 0) {
+		$string =~ s#".*?"#""#g;
 		my $number_of_open_brackets = () = $string =~ /(?<!\\)\(/gi;
 		my $number_of_close_brackets = () = $string =~ /(?<!\\)\)/gi;
 		if($number_of_open_brackets == $number_of_close_brackets) {
@@ -473,4 +481,13 @@ sub check_balanced_objects {
 		}
 	}
 	return "NOT OK";
+}
+
+END {
+	if (keys %errors) {
+		print "Most common errors:\n";
+		foreach my $error (sort { $errors{$a} <=> $errors{$b} } keys %errors) {
+			print "\t$error: $errors{$error}\n";
+		}
+	}
 }
