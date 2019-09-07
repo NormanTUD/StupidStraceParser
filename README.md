@@ -19,4 +19,4 @@ program saves which file it is for and always prints the path of the descriptor.
 
 # Screenshot of the output
 
-![Screenshot](Screenshot.png?raw=true "Screenshot")
+![Screenshot](screenshot.png?raw=true "Screenshot")
