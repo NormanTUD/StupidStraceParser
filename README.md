@@ -1,4 +1,5 @@
 # StupidStraceParser
+
 This is a very simple perl script that parses strace-outputs and marks errors
 
 # How to call
@@ -15,3 +16,7 @@ This might not recognize all commands. It stops whenever it doesn't recognize a 
 
 Lines that it recognizes and that have errors have a red output. Also, once you opened a file-descriptor, the
 program saves which file it is for and always prints the path of the descriptor.
+
+# Screenshot of the output
+
+![Screenshot](Screenshot.png?raw=true "Screenshot")
