@@ -17,6 +17,10 @@ This might not recognize all commands. It stops whenever it doesn't recognize a 
 Lines that it recognizes and that have errors have a red output. Also, once you opened a file-descriptor, the
 program saves which file it is for and always prints the path of the descriptor.
 
+Also, everytime an error is detected, it tries to open the man page and look what the error means. If something
+is found there, it will print the man page description of the error. (As such, it's best to run this on the
+system the original program ran on, because the man pages on other systems may differ!)
+
 # Screenshot of the output
 
 ![Screenshot](screenshot.png?raw=true "Screenshot")
