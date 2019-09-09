@@ -10,7 +10,6 @@ use Hash::Util;
 use Data::Dumper;
 use Term::ANSIColor;
 use Memoize;
-use Text::Wrap;
 
 memoize 'get_man_page';
 
