@@ -10,6 +10,7 @@ use Hash::Util;
 use Data::Dumper;
 use Term::ANSIColor;
 use Memoize;
+use Text::Wrap;
 
 memoize 'get_man_page';
 
@@ -237,7 +238,7 @@ sub get_error_string {
 	my ($manpage, $errors) = get_man_page($+{funcname});
 	my $error = error(\%+, $errors);
 	if($error) {
-		return $error;
+		return "$error";
 	} else {
 		return '';
 	}
@@ -254,9 +255,9 @@ sub error {
 	chomp $error;
 
 	if($error) {
-		my $str = ". ".color("underline red")."ERROR: $error".color("reset");
+		my $str = color("reset")."\n-> ".color("underline red")."ERROR: $error".color("reset");
 		if(exists $errors->{$errorcode}) {
-			$str .= ' -> '.$errors->{$errorcode};
+			$str .= "\n-> ".$errors->{$errorcode};
 		}
 		return $str;
 	} else {
@@ -298,7 +299,12 @@ sub get_man_page {
 				my $desc = $2;
 				$desc = join(' ', split(/\R/, $desc));
 				$desc =~ s#\s{2,}# #g;
-				$errors{$error} = $desc;
+				$desc =~ s#‐ ##g;
+				if(exists $errors{$error}) {
+					$errors{$error} .= "\n-> ".color("underline")."ALTERNATIVE MEANING".color("reset").":\t".$desc;
+				} else {
+					$errors{$error} = color("underline")."MEANING".color("reset").":\t\t".$desc;
+				}
 			}
 		}
 	}
