@@ -57,6 +57,7 @@ sub main {
 		$i++;
 		next if $line =~ m#^[a-z]+\d+\s+#;
 		next if $line =~ m#^[^a-z0-9]#;
+		next if $line !~ m#\s+=\s+#;
 		next if $line =~ m#<unfinished \.\.\.>#;
 		next if $line =~ m#<\.\.\. .* resumed>#;
 		if(check_balanced_objects($line) ne "OK") {
