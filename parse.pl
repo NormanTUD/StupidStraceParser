@@ -457,7 +457,7 @@ sub skip_line {
 
 END {
 	if ($options{show_most_commons_errors} && keys %all_errors) {
-		print "Most common errors:\n";
+		print "\n\n\n".color("black on_red")."Most common errors:$reset\n";
 		foreach my $error (sort { $all_errors{$a} <=> $all_errors{$b} } keys %all_errors) {
 			print "\t$error\n-> Times encountered: $all_errors{$error}\n";
 		}
