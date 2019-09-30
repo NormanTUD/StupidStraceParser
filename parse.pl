@@ -14,15 +14,14 @@ use Memoize;
 
 memoize 'get_man_page';
 
-my $default_color = "blue";
-my $debug_color = "magenta";
 my %all_errors = ();
 
 my %options = (
 	filename => undef,
 	debug => 0,
 	show_only_errors => 0,
-	die_on_error => 1
+	die_on_error => 1,
+	show_most_commons_errors => 1
 );
 
 analyze_args(@ARGV);
@@ -34,7 +33,25 @@ my %open_fds = (
 	2 => 'STDERR'
 );
 
-my ($command_color, $result_color, $reset) = (color("cyan"), color("underline green"), color("reset"));
+my (
+	$command_color, 
+	$result_color, 
+	$reset, 
+	$underline, 
+	$underline_red, 
+	$red, 
+	$debug_color, 
+	$default_color
+) = (
+	color("cyan"), 
+	color("underline green"), 
+	color("reset"), 
+	color("underline"), 
+	color("underline red"), 
+	color("red"), 
+	color("magenta"), 
+	color("yellow")
+);
 
 main();
 
@@ -59,25 +76,12 @@ sub main {
 	my $i = 0;
 
 	while (my $line = <$fh>) {
-		debug join('', map { chomp $_; $_ } $line);
 		$line =~ s#^(\d*\s*)*##g;
+		chomp $line;
 		$i++;
-		if($line =~ m#^[a-z]+\d+\s+#) {
-			debug "Line does not start with letters. Skipping it.";
-			next;
-		}
-		if($line =~ m#^[^a-z0-9]#) {
-			debug "Line does not start with letters. Skipping it.";
-			next;
-		}
-		if($line !~ m#\s+=\s+#) {
-			debug "Line does not seem like a function call. Skipping it.";
-			next;
-		}
-		if($line =~ m#<unfinished \.\.\.># || $line =~ m#<\.\.\. .* resumed>#) {
-			debug "Skipping threaded lines containing 'unfinished' or 'resumed'.";
-			next;
-		}
+
+		next if skip_line($line);
+		debug join('', map { chomp $_; $_ } $line);
 
 		if(check_balanced_objects($line) ne "OK") {
 			warn "ERROR: In line >>>\n$line<<< there are unbalanced characters! Skipping this line.\n";
@@ -206,7 +210,7 @@ sub main {
 			# Do nothing intentionally with empty lines
 		} else {
 			chomp $line;
-			errormsg "Unknown line $i\n".color("red").$line.color("reset")."\n";
+			errormsg "Unknown line $i\n".$red.$line.$reset."\n";
 		}
 	}
 	close $fh;
@@ -237,23 +241,56 @@ sub analyze_args {
 			$options{show_only_errors} = 1;
 		} elsif (m#^--dont_die_on_error$#) {
 			$options{die_on_error} = 0;
+		} elsif (m#^--dont_show_most_commons_errors$#) {
+			$options{show_most_commons_errors} = 0;
+		} elsif (m#^--help$#) {
+			_help(0);
 		} else {
-			die "Unknown parameter $_";
+			warn "Unknown parameter $_";
+			_help(1);
 		}
 	}
+}
+
+sub _help {
+	my $exit_code = shift;
+
+	print <<'EOF';
+StupidStraceParser
+
+=============================================================================================
+
+This is a simple strace-log-parser that outputs a colorful version of any strace-log.
+Also, this decodes names file handle ids to file names whenever possible.
+
+These are it's options:
+
+	--help					This help menu
+	--debug					Enables debug-output
+	--filename=logfile			The name of the log file
+	--show_only_errors			Show only lines that contain errors and open/
+						closing FDs and such
+	--dont_die_on_error			Warn instead of die when encountering a line
+						this script cannot read
+	--dont_show_most_commons_errors		Don't how the most common errors at the end of
+						the script.
+
+EOF
+
+	exit($exit_code);
 }
 
 sub debug (@) {
 	if($options{debug}) {
 		foreach (@_) {
-			warn color($debug_color).join("\n", map { "DEBUG>>> ".$_; } split(/\R/, $_)).color("reset")."\n";
+			warn $debug_color.join("\n", map { $red."DEBUG: ".$debug_color.$_.$reset; } split(/\R/, $_)).$reset."\n";
 		}
 	}
 }
 
 sub printmsg (@) {
 	my $msg = shift;
-	print color($default_color).$msg.color("reset")."\n";
+	print $default_color.$msg.$reset."\n";
 }	
 
 sub fd_to_filename {
@@ -261,9 +298,9 @@ sub fd_to_filename {
 	debug "fd_to_filename($fd)";
 
 	if(exists $open_fds{$fd}) {
-		return color("underline").$open_fds{$fd}.color("reset").color($default_color);
+		return $underline.$open_fds{$fd}.$reset.$default_color;
 	} else {
-		return color("red")."!!! ERROR: unknown_fd !!!".color($default_color);
+		return $red."!!! ERROR: unknown_fd !!!".$default_color;
 	}
 }
 
@@ -292,7 +329,7 @@ sub error {
 	chomp $error;
 
 	if($error) {
-		my $str = color("reset")."\n-> ".color("underline red")."ERROR: $error".color("reset");
+		my $str = $reset."\n-> ".$underline_red."ERROR: $error".$reset;
 		if(exists $errors->{$errorcode}) {
 			$str .= "\n-> ".$errors->{$errorcode};
 		}
@@ -339,9 +376,9 @@ sub get_man_page {
 				$desc =~ s#\s{2,}# #g;
 				$desc =~ s#‐ ##g;
 				if(exists $errors{$error}) {
-					$errors{$error} .= "\n-> ".color("underline")."ALTERNATIVE MEANING".color("reset").":\t".$desc;
+					$errors{$error} .= "\n-> ".$underline."ALTERNATIVE MEANING".$reset.":\t".$desc;
 				} else {
-					$errors{$error} = color("underline")."MEANING".color("reset").":\t\t".$desc;
+					$errors{$error} = $underline."MEANING".$reset.":\t\t".$desc;
 				}
 			}
 		}
@@ -368,11 +405,40 @@ sub check_balanced_objects {
 	return "NOT OK";
 }
 
+sub skip_line {
+	my $line = shift;
+	debug "skip_line($line)";
+
+	if($line =~ m#^\s*$#) {
+		debug "Skipping empty lines.";
+		return 1;
+	}
+
+	if($line =~ m#^[a-z]+\d+\s+#) {
+		debug "Line does not start with letters. Skipping it.";
+		return 1;
+	}
+	if($line =~ m#^[^a-z0-9]#) {
+		debug "Line does not start with letters. Skipping it.";
+		return 1;
+	}
+	if($line !~ m#\s+=\s+#) {
+		debug "Line does not seem like a function call. Skipping it.";
+		return 1;
+	}
+	if($line =~ m#<unfinished \.\.\.># || $line =~ m#<\.\.\. .* resumed>#) {
+		debug "Skipping threaded lines containing 'unfinished' or 'resumed'.";
+		return 1;
+	}
+
+	return 0;
+}
+
 END {
-	if (keys %all_errors) {
+	if ($options{show_most_commons_errors} && keys %all_errors) {
 		print "Most common errors:\n";
 		foreach my $error (sort { $all_errors{$a} <=> $all_errors{$b} } keys %all_errors) {
-			print "\t$error: $all_errors{$error}\n";
+			print "\t$error\n-> Times encountered: $all_errors{$error}\n";
 		}
 	}
 }
