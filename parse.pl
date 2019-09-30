@@ -14,7 +14,8 @@ use Memoize;
 memoize 'get_man_page';
 
 my $default_color = "blue";
-my %errors = ();
+my $debug_color = "magenta";
+my %all_errors = ();
 
 my %options = (
 	filename => undef,
@@ -36,10 +37,9 @@ my ($command_color, $result_color, $reset) = (color("cyan"), color("underline gr
 main();
 
 sub main {
+	debug "main()";
 	return unless $options{filename};
 	
-
-
 	#my %stats = ();
 	open my $fh, '<', $options{filename};
 
@@ -56,6 +56,7 @@ sub main {
 	my $i = 0;
 
 	while (my $line = <$fh>) {
+		debug join('', map { chomp $_; $_ } $line);
 		$line =~ s#^(\d*\s*)*##g;
 		$i++;
 		next if $line =~ m#^[a-z]+\d+\s+#;
@@ -219,7 +220,7 @@ sub analyze_args {
 sub debug (@) {
 	if($options{debug}) {
 		foreach (@_) {
-			warn color($default_color)."$_".color("reset")."\n";
+			warn color($debug_color).join("\n", map { "DEBUG>>> ".$_; } split(/\R/, $_)).color("reset")."\n";
 		}
 	}
 }
@@ -231,6 +232,7 @@ sub printmsg (@) {
 
 sub fd_to_filename {
 	my $fd = shift;
+	debug "fd_to_filename($fd)";
 
 	if(exists $open_fds{$fd}) {
 		return color("underline").$open_fds{$fd}.color("reset").color($default_color);
@@ -241,10 +243,12 @@ sub fd_to_filename {
 
 sub get_error_string {
 	my $plus = shift;
+	debug "get_error_string(".Dumper($plus).")";
 	my ($manpage, $errors) = get_man_page($+{funcname});
 	my $error = error(\%+, $errors);
 	if($error) {
-		return "$error";
+		$all_errors{$error}++;
+		return $error;
 	} else {
 		return '';
 	}
@@ -252,6 +256,7 @@ sub get_error_string {
 
 sub error {
 	my $plus = shift;
+	debug "error(".Dumper($plus).")";
 	return unless exists $plus->{error};
 	my $errors = shift;
 
@@ -273,6 +278,7 @@ sub error {
 
 sub get_man_page {
 	my $name = shift;
+	debug "get_man_page($name)";
 
 	my $contents = qx(man 2 $name 2> /dev/null);
 	$contents =~ s/^(?:.*\n){5}//;
@@ -320,7 +326,7 @@ sub get_man_page {
 
 sub check_balanced_objects {
 	my $string = shift;
-
+	debug "check_balanced_objects($string)";
 
 	$string =~ s#\\\\##g;
 	my $number_of_quotes = () = $string =~ /(?<!\\)"/gi;
@@ -337,10 +343,10 @@ sub check_balanced_objects {
 }
 
 END {
-	if (keys %errors) {
+	if (keys %all_errors) {
 		print "Most common errors:\n";
-		foreach my $error (sort { $errors{$a} <=> $errors{$b} } keys %errors) {
-			print "\t$error: $errors{$error}\n";
+		foreach my $error (sort { $all_errors{$a} <=> $all_errors{$b} } keys %all_errors) {
+			print "\t$error: $all_errors{$error}\n";
 		}
 	}
 }
