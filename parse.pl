@@ -18,7 +18,8 @@ my %errors = ();
 
 my %options = (
 	filename => undef,
-	debug => 1
+	debug => 0,
+	show_only_errors => 0
 );
 
 analyze_args(@ARGV);
@@ -29,6 +30,8 @@ my %open_fds = (
 	1 => 'STDOUT',
 	2 => 'STDERR'
 );
+
+my ($command_color, $result_color, $reset) = (color("cyan"), color("underline green"), color("reset"));
 
 main();
 
@@ -180,7 +183,9 @@ sub main {
 		} elsif($line =~ m#^(?<funcname>[a-z0-9_]+)\((?<firstparam>.*?)\)$retval#g) {
 			#get_mempolicy(NULL, NULL, 0, NULL, 0) = 0
 			my $error = get_error_string(\%+);
-			printmsg "$+{funcname}($+{firstparam}) = $+{ret}".$error;
+			if(($options{show_only_errors} && $error) || !$options{show_only_errors}) {
+				printmsg "$command_color$+{funcname}($+{firstparam})$reset = $result_color$+{ret}$reset".$error;
+			}
 		} elsif ($line =~ m#^\s*$#) {
 			# Do nothing intentionally with empty lines
 		} else {
@@ -203,6 +208,8 @@ sub analyze_args {
 			} else {
 				die "$1 not found!";
 			}
+		} elsif (m#^--show_only_errors$#) {
+			$options{show_only_errors} = 1;
 		} else {
 			die "Unknown parameter $_";
 		}
