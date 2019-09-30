@@ -89,7 +89,9 @@ sub main {
 		}
 		if($line =~ m#^(?<funcname>open)\("(?<filename>.*?)"(?:,\s*(?<rest>.*))?\)$retval#g) {
 			my $error = get_error_string(\%+);
-			printmsg "Opening $+{filename} in mode $+{rest}, returned fd $+{ret}".$error;
+			if(!$options{show_only_errors} || ($options{show_only_errors} && $error)) {
+				printmsg "Opening $+{filename} in mode $+{rest}, returned fd $+{ret}".$error;
+			}
 			if(!$error) {
 				$open_fds{$+{ret}} = $+{filename};
 			}
@@ -103,7 +105,9 @@ sub main {
 		} elsif ($line =~ m#^(?<funcname>close)\((?<fd>\d+)\)$retval#) {
 			#close(3)
 			my $error = get_error_string(\%+);
-			printmsg "Closing $+{fd} (to ".fd_to_filename($+{fd})."), returned $+{ret}".$error;
+			if(!$options{show_only_errors} || ($options{show_only_errors} && $error)) {
+				printmsg "Closing $+{fd} (to ".fd_to_filename($+{fd})."), returned $+{ret}".$error;
+			}
 			my $fd = $+{fd};
 			if($fd !~ m#^(?:0|1|2)$#) {
 				delete $open_fds{$fd};
@@ -112,17 +116,22 @@ sub main {
 			#read(3, "\177ELF\2\1\1\0\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0\300\30\0\0\0\0\0\0"..., 832) = 832
 			#read(10, 0x7ffd3f49825f, 1)             = ? ERESTARTSYS (To be restarted if SA_RESTART is set)
 			my $error = get_error_string(\%+);
-			if(exists $+{len} && defined $+{len}) {
-				printmsg "Reading $+{len} from $+{fd} (".fd_to_filename($+{fd})."), got $+{ret}".$error; 
-			} else {
-				printmsg "Reading from $+{fd} (".fd_to_filename($+{fd})."), got $+{ret}".$error; 
+			if(!$options{show_only_errors} || ($options{show_only_errors} && $error)) {
+				if(exists $+{len} && defined $+{len}) {
+					printmsg "Reading $+{len} from $+{fd} (".fd_to_filename($+{fd})."), got $+{ret}".$error; 
+				} else {
+					printmsg "Reading from $+{fd} (".fd_to_filename($+{fd})."), got $+{ret}".$error; 
+				}
 			}
 		} elsif ($line =~ m#^(?<funcname>ioctl)\((?<fd>$num),\s*(?<mode>$mode)(?:,\s*.*?)?\)$retval#) {
 			#ioctl(0, TCGETS, {B38400 opost isig icanon echo ...}) = 0
 			#ioctl(10, SNDCTL_TMR_STOP or TCSETSW, {B38400 opost isig -icanon -echo ...}) = 0
 			#ioctl(2, TCGETS, 0x7ffd3f481be0)        = -1 ENOTTY (Inappropriate ioctl for device)
 			my $error = get_error_string(\%+);
-			printmsg "ioctl($+{fd} [ -> ".fd_to_filename($+{fd})."], ...) = $+{ret}".$error;
+
+			if(!$options{show_only_errors} || ($options{show_only_errors} && $error)) {
+				printmsg "ioctl($+{fd} [ -> ".fd_to_filename($+{fd})."], ...) = $+{ret}".$error;
+			}
 		} elsif ($line =~ m#^(?<funcname>fcntl)\((?<fd>\d+),\s*(?<mode>$hex_or_num_or_null_or_mode)(?:,\s*(?<param>$hex_or_num_or_null_or_mode))?\)$retval#) {
 			#fcntl(3, F_DUPFD, 10)                   = 10
 			my $error = get_error_string(\%+);
@@ -130,12 +139,16 @@ sub main {
 		} elsif ($line =~ m#^(?<funcname>pipe)\(\[(?<pipe1>\d*),\s*(?<pipe2>\d+)]\)$retval#) {
 			#pipe([3, 4])                            = 0
 			my $error = get_error_string(\%+);
-			printmsg "Opening pipe $+{pipe1}, set to $+{pipe2}".$error;
+			if(!$options{show_only_errors} || ($options{show_only_errors} && $error)) {
+				printmsg "Opening pipe $+{pipe1}, set to $+{pipe2}".$error;
+			}
 			$open_fds{$+{pipe1}} = $+{pipe2};
 		} elsif ($line =~ m#^(?<funcname>pipe2)\(\[(?<pipe1>\d*),\s*(?<pipe2>\d+)],\s*(?<mode>$mode)\)$retval#) {
 			#pipe2([3, 4], O_CLOEXEC)                = 0
 			my $error = get_error_string(\%+);
-			printmsg "Opening pipe2 $+{pipe1}, set to $+{pipe2} with mode $+{mode}".$error;
+			if(!$options{show_only_errors} || ($options{show_only_errors} && $error)) {
+				printmsg "Opening pipe2 $+{pipe1}, set to $+{pipe2} with mode $+{mode}".$error;
+			}
 			$open_fds{$+{pipe1}} = $+{pipe2};
 		} elsif ($line =~ m#^(?<funcname>dup)\((?<fd>\d+)\)$retval#) {
 			#dup(0)                                  = 5
@@ -167,7 +180,9 @@ sub main {
 			#lseek(3, 0, SEEK_CUR)                   = 0
 			#lseek(11, 0, SEEK_CUR)                  = 0
 			my $error = get_error_string(\%+);
-			printmsg "lseek'ing $+{fd} (-> ".fd_to_filename($+{fd})."), mode = $+{mode}, returned: $+{ret}".$error;
+			if(!$options{show_only_errors} || ($options{show_only_errors} && $error)) {
+				printmsg "lseek'ing $+{fd} (-> ".fd_to_filename($+{fd})."), mode = $+{mode}, returned: $+{ret}".$error;
+			}
 		} elsif ($line =~ m#^(?<funcname>newfstatat)\((?<fd>\d+),\s*"(?<path>.*?)",.*?\)$retval#) {
 			#newfstatat(13, "sys/bus/pci/devices/0000:07:00.1//mic", 0x7ffd54c66a30, AT_SYMLINK_NOFOLLOW) = -1 ENOENT (No such file or directory)
 			my $error = get_error_string(\%+);
@@ -188,7 +203,9 @@ sub main {
 			#write(1, "ack-grep not found\n", 19)    = 19
 			#write(2, "INFO:hyperopt.mongoexp:PROTOCOL "..., 38) = -1 EPIPE (Broken pipe)
 			my $error = get_error_string(\%+);
-			printmsg "Writing $+{rest} to fd $+{fd} ( -> ".fd_to_filename($+{fd})."), returned $+{ret}".$error;
+			if(!$options{show_only_errors} || ($options{show_only_errors} && $error)) {
+				printmsg "Writing $+{rest} to fd $+{fd} ( -> ".fd_to_filename($+{fd})."), returned $+{ret}".$error;
+			}
 		} elsif ($line =~ m#^(?<funcname>recvfrom)\((?<socket>\d+),.*\)$retval#) {
 			#recvfrom(4, "\340\0\0\0\313\234\0\0{\337\2001\335\7\0\0", 16, 0, NULL, NULL) = 16
 			my $error = get_error_string(\%+);
