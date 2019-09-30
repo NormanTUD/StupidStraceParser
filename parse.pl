@@ -307,6 +307,7 @@ sub fd_to_filename {
 sub get_error_string {
 	my $plus = shift;
 	debug "get_error_string(".Dumper($plus).")";
+	return '' unless exists($plus->{error});
 	my ($manpage, $errors) = get_man_page($+{funcname});
 	my $error = error(\%+, $errors);
 	if($error) {
@@ -319,8 +320,11 @@ sub get_error_string {
 
 sub error {
 	my $plus = shift;
+	unless(exists $plus->{error}) {
+		debug "error(...)";
+		return;
+	}
 	debug "error(".Dumper($plus).")";
-	return unless exists $plus->{error};
 	my $errors = shift;
 
 	my $error = $plus->{error};
