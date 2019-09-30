@@ -20,6 +20,12 @@ flag for extra debug-output. Also, the
 
 parameters only shows lines that have recognized errors.
 
+With
+
+> --dont\_die\_on\_error
+
+the program will not stop when a line is not recognized, but only warn so.
+
 This might not recognize all commands. It stops whenever it doesn't recognize a line.
 
 # What it's good for

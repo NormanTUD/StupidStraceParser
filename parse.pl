@@ -2,6 +2,7 @@
 
 sub debug (@);
 sub printmsg (@);
+sub errormsg ($);
 
 use strict;
 use warnings FATAL => "all";
@@ -20,7 +21,8 @@ my %all_errors = ();
 my %options = (
 	filename => undef,
 	debug => 0,
-	show_only_errors => 0
+	show_only_errors => 0,
+	die_on_error => 1
 );
 
 analyze_args(@ARGV);
@@ -38,6 +40,7 @@ main();
 
 sub main {
 	debug "main()";
+	debug Dumper \%options;
 	return unless $options{filename};
 	
 	#my %stats = ();
@@ -59,11 +62,23 @@ sub main {
 		debug join('', map { chomp $_; $_ } $line);
 		$line =~ s#^(\d*\s*)*##g;
 		$i++;
-		next if $line =~ m#^[a-z]+\d+\s+#;
-		next if $line =~ m#^[^a-z0-9]#;
-		next if $line !~ m#\s+=\s+#;
-		next if $line =~ m#<unfinished \.\.\.>#;
-		next if $line =~ m#<\.\.\. .* resumed>#;
+		if($line =~ m#^[a-z]+\d+\s+#) {
+			debug "Line does not start with letters. Skipping it.";
+			next;
+		}
+		if($line =~ m#^[^a-z0-9]#) {
+			debug "Line does not start with letters. Skipping it.";
+			next;
+		}
+		if($line !~ m#\s+=\s+#) {
+			debug "Line does not seem like a function call. Skipping it.";
+			next;
+		}
+		if($line =~ m#<unfinished \.\.\.># || $line =~ m#<\.\.\. .* resumed>#) {
+			debug "Skipping threaded lines containing 'unfinished' or 'resumed'.";
+			next;
+		}
+
 		if(check_balanced_objects($line) ne "OK") {
 			warn "ERROR: In line >>>\n$line<<< there are unbalanced characters! Skipping this line.\n";
 			next;
@@ -191,10 +206,19 @@ sub main {
 			# Do nothing intentionally with empty lines
 		} else {
 			chomp $line;
-			die "Unknown line $i\n".color("red").$line.color("reset")."\n";
+			errormsg "Unknown line $i\n".color("red").$line.color("reset")."\n";
 		}
 	}
 	close $fh;
+}
+
+sub errormsg ($) {
+	my $msg = shift;
+	if($options{die_on_error}) {
+		die $msg;
+	} else {
+		warn $msg;
+	}
 }
 
 sub analyze_args {
@@ -211,6 +235,8 @@ sub analyze_args {
 			}
 		} elsif (m#^--show_only_errors$#) {
 			$options{show_only_errors} = 1;
+		} elsif (m#^--dont_die_on_error$#) {
+			$options{die_on_error} = 0;
 		} else {
 			die "Unknown parameter $_";
 		}
