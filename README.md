@@ -26,8 +26,6 @@ With
 
 the program will stop when a line is not recognized (useful for debugging this script).
 
-This might not recognize all commands. It stops whenever it doesn't recognize a line.
-
 Use
 
 > --help
