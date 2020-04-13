@@ -8,7 +8,7 @@ Simply use
 
 > strace -o $LOGFILE yourprogram
 
-> perl parse.pl --debug --filename=$LOGFILE
+> perl parse.pl --filename=$LOGFILE
 
 You can add the 
 
@@ -27,6 +27,12 @@ With
 the program will not stop when a line is not recognized, but only warn so.
 
 This might not recognize all commands. It stops whenever it doesn't recognize a line.
+
+Use
+
+> --help
+
+for help.
 
 # What it's good for
 
