@@ -2,6 +2,15 @@
 
 This is a very simple perl script that parses strace-outputs and marks errors
 
+# Dependencies
+
+Make sure you have these Perl-Modules installed:
+
+> sudo cpan -i Hash::Util
+> sudo cpan -i Data::Dumper
+> sudo cpan -i Term::ANSIColor
+> sudo cpan -i Memoize
+
 # How to call
 
 Simply use 
