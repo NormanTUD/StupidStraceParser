@@ -20,7 +20,7 @@ my %options = (
 	filename => undef,
 	debug => 0,
 	show_only_errors => 0,
-	die_on_error => 1,
+	die_on_error => 0,
 	show_most_commons_errors => 1
 );
 
@@ -256,8 +256,8 @@ sub analyze_args {
 			}
 		} elsif (m#^--show_only_errors$#) {
 			$options{show_only_errors} = 1;
-		} elsif (m#^--dont_die_on_error$#) {
-			$options{die_on_error} = 0;
+		} elsif (m#^--die_on_error$#) {
+			$options{die_on_error} = 1;
 		} elsif (m#^--dont_show_most_commons_errors$#) {
 			$options{show_most_commons_errors} = 0;
 		} elsif (m#^--help$#) {
